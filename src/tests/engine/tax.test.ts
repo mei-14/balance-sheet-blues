@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { taxRules as rules } from '../../rules/tax';
 import { pesos } from '../../engine/money';
+import { deadlineRules } from '../../rules/deadlines';
 import {
+  annualIncomeTaxDeadline,
   corporateIncomeTax,
+  monthlyRemittanceDeadline,
+  quarterEndDate,
+  quarterlyDeadline,
+  thirteenthMonthDeadline,
   percentageTax,
   requiresVatRegistration,
   splitVatInclusive,
@@ -77,5 +83,34 @@ describe('corporate income tax', () => {
   });
   it('a loss pays no regular tax', () => {
     expect(corporateIncomeTax({ ...small, netTaxableIncome: -pesos('500000') }, rules).regularTax).toBe(0);
+  });
+});
+
+describe('filing deadlines', () => {
+  const d = deadlineRules;
+  it('finds quarter ends', () => {
+    expect(quarterEndDate(2026, 1)).toBe('2026-03-31');
+    expect(quarterEndDate(2026, 2)).toBe('2026-06-30');
+    expect(quarterEndDate(2028, 4)).toBe('2028-12-31');
+  });
+  it('VAT and percentage tax are due 25 days after quarter end', () => {
+    expect(quarterlyDeadline('vat', 2026, 1, d)).toBe('2026-04-25');
+    expect(quarterlyDeadline('percentageTax', 2026, 2, d)).toBe('2026-07-25');
+    expect(quarterlyDeadline('vat', 2026, 4, d)).toBe('2027-01-25');
+  });
+  it('quarterly income tax is due 60 days after quarter end, with no Q4 return', () => {
+    expect(quarterlyDeadline('incomeTax', 2026, 1, d)).toBe('2026-05-30');
+    expect(quarterlyDeadline('incomeTax', 2026, 2, d)).toBe('2026-08-29');
+    expect(quarterlyDeadline('incomeTax', 2026, 4, d)).toBeNull();
+  });
+  it('annual return is due April 15 of the following year', () => {
+    expect(annualIncomeTaxDeadline(2026, d)).toBe('2027-04-15');
+  });
+  it('monthly remittances fall in the next month, rolling over December', () => {
+    expect(monthlyRemittanceDeadline('withholding', 2026, 1, d)).toBe('2026-02-10');
+    expect(monthlyRemittanceDeadline('contributions', 2026, 12, d)).toBe('2027-01-10');
+  });
+  it('13th month pay is due December 24', () => {
+    expect(thirteenthMonthDeadline(2026, d)).toBe('2026-12-24');
   });
 });

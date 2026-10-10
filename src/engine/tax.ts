@@ -1,5 +1,6 @@
 import type { Centavos } from './money';
 import { mulBps } from './money';
+import type { DeadlineRules, Quarter } from '../rules/deadlines';
 import type { TaxRules, WithholdingCategory } from '../rules/tax';
 
 /** VAT on a VAT-exclusive (net) amount. */
@@ -75,4 +76,59 @@ export function corporateIncomeTax(input: CorporateTaxInput, rules: TaxRules): C
   const mcit = mcitInForce ? mulBps(Math.max(input.grossIncome, 0), r.mcitRateBps) : 0;
   const mcitApplies = mcitInForce && mcit > regularTax;
   return { rateBps, regularTax, mcit, mcitApplies, taxDue: mcitApplies ? mcit : regularTax };
+}
+
+// ---- BIR filing deadlines (dates are ISO yyyy-mm-dd strings; UTC math avoids timezone bugs) ----
+
+export type QuarterlyReturn = 'vat' | 'percentageTax' | 'incomeTax';
+
+function isoDate(year: number, month: number, day: number): string {
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function addDaysIso(iso: string, days: number): string {
+  const [y, m, d] = iso.split('-').map(Number) as [number, number, number];
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}
+
+export function quarterEndDate(year: number, quarter: Quarter): string {
+  const month = quarter * 3;
+  return isoDate(year, month, new Date(Date.UTC(year, month, 0)).getUTCDate());
+}
+
+/** Returns null when no return is due for that quarter (income tax has no Q4 quarterly return). */
+export function quarterlyDeadline(
+  kind: QuarterlyReturn,
+  year: number,
+  quarter: Quarter,
+  rules: DeadlineRules,
+): string | null {
+  const q = rules.quarterly;
+  const end = quarterEndDate(year, quarter);
+  if (kind === 'vat') return addDaysIso(end, q.vatReturnDays);
+  if (kind === 'percentageTax') return addDaysIso(end, q.percentageTaxReturnDays);
+  return q.incomeTaxQuarters.includes(quarter) ? addDaysIso(end, q.incomeTaxReturnDays) : null;
+}
+
+/** Annual income tax return for a tax year; due in the following calendar year. */
+export function annualIncomeTaxDeadline(taxYear: number, rules: DeadlineRules): string {
+  const d = rules.annual.incomeTaxReturn;
+  return isoDate(taxYear + 1, d.month, d.day);
+}
+
+/** Remittance for `month` (1-12) of `year` is due in the following month. */
+export function monthlyRemittanceDeadline(
+  kind: 'withholding' | 'contributions',
+  year: number,
+  month: number,
+  rules: DeadlineRules,
+): string {
+  const day =
+    kind === 'withholding' ? rules.monthly.withholdingRemittanceDay : rules.monthly.contributionsRemittanceDay;
+  return month === 12 ? isoDate(year + 1, 1, day) : isoDate(year, month + 1, day);
+}
+
+export function thirteenthMonthDeadline(year: number, rules: DeadlineRules): string {
+  const d = rules.thirteenthMonthPay;
+  return isoDate(year, d.month, d.day);
 }
